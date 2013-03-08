@@ -1,0 +1,227 @@
+/*  Soil Moisture Routing (SMR) Model
+/*  Daily.txt
+
+/*  Input weather parameters from weather_aml.txt
+/*  These include day of year, year, depth of rain,
+/*  snowmelt, and potential evapotranspiration
+
+
+&args day_s time_s year_s rain meltclear pet
+
+&setvar day_s = %day_s%
+&setvar time_s = %time_s%
+&setvar year_s = %year_s%
+&setvar rain = %rain%
+&setvar meltclear = %meltclear%
+&setvar pet = %pet%
+
+
+/*  Print the daily input parameters to the screen.
+
+
+&type day = %day_s%, time = %time_s%, year = 19%year_s%, rain = %rain%
+&type meltclear = %meltclear%, pet = %pet% 
+
+
+/*  Set the region, cell size, and watershed area
+
+
+setwindow el
+setcell el
+setmask watershed
+verify off
+
+
+/*  Add the daily precip input
+
+
+storage_amt = storage_amt + %rain% + %meltclear%
+
+
+/*  Distribute the precip. input among the A, B, and E soil layers, 
+/*  taking into account each layers field capacity, soil depth, and
+/*  storage amount.
+
+
+if (storage_amt < fc_amt) storage_amt_E = soil_depth_E * storage_amt / soil_depth
+ else if ((storage_amt - fc_amt_A - fc_amt_B) < sat_mc_E * soil_depth_E) storage_amt_E = storage_amt - fc_amt_A - fc_amt_B
+       else storage_amt_E = sat_mc_E * soil_depth_E
+endif
+
+if (storage_amt < fc_amt) storage_amt_B = soil_depth_B * storage_amt / soil_depth
+ else if ((storage_amt - storage_amt_E - fc_amt_A) < sat_mc_B * soil_depth_B) storage_amt_B = storage_amt - storage_amt_E - fc_amt_A
+       else storage_amt_B = sat_mc_B * soil_depth_B
+endif
+
+if (storage_amt < fc_amt) storage_amt_A = soil_depth_A * storage_amt / soil_depth
+ else if ((storage_amt - storage_amt_E - storage_amt_B) < sat_mc_A * soil_depth_A) storage_amt_A = storage_amt - storage_amt_E - storage_amt_B
+       else storage_amt_A = sat_mc_B * soil_depth_B
+endif
+
+
+/*  Calculate the effective hydraulic conductivity of each layer
+/*  based on Breslers formula using each layers saturation,
+/*  field capacity and storage amount.
+
+
+if (storage_amt_A < fc_amt_A) effk_A = ksat_A * exp((float(-13) / sat_mc_A) * (sat_mc_A - storage_amt_A / soil_depth_A))
+ else if (storage_amt_A >= sat_mc_A * soil_depth_A) effk_A = ksat_A * 10
+       else effk_A = (ksat_A - kfc_A) * (float(storage_amt_A) / soil_depth_A - fieldcap_mc_A) / (sat_mc_A - fieldcap_mc_A) + kfc_A
+endif
+
+if (storage_amt_B < fc_amt_B) effk_B = ksat_B * exp((float(-13) / sat_mc_B) * (sat_mc_B - storage_amt_B / soil_depth_B))
+ else if (storage_amt_B >= sat_mc_B * soil_depth_B) effk_B = ksat_B * 5
+       else effk_B = (ksat_B - kfc_B) * (float(storage_amt_B) / soil_depth_B - fieldcap_mc_B) / (sat_mc_B - fieldcap_mc_B) + kfc_B
+endif
+
+if (storage_amt_E < fc_amt_E) effk_E = ksat_E * exp((float(-13) / sat_mc_E) * (sat_mc_E - storage_amt_E / soil_depth_E))
+ else if (storage_amt_E >= sat_mc_E * soil_depth_E) effk_E = ksat_E * 2
+       else effk_E = (ksat_E - kfc_E) * (float(storage_amt_E) / soil_depth_E - fieldcap_mc_E) / (sat_mc_E - fieldcap_mc_E) + kfc_E
+endif
+
+
+/*  Ensure that the hydraulic conductivity is not less than zero.
+
+
+effk_A = max(effK_A, 0)
+effk_B = max(effK_B, 0)
+effk_E = max(effK_E, 0)
+
+
+/*  Calculate the lateral flow from each cell based on its slope,
+/*  storage amount, effective conductivity, and soil depth.
+
+
+lateral_flow = min(storage_amt_A, (effk_A * slope2 / 1000 * soil_depth_A / 500)) + min(storage_amt_B, (effk_B * slope2 / 1000 * soil_depth_B / 500)) + min (storage_amt_E, (effk_E * slope2 / 1000 * soil_depth_E / 500))
+
+
+/*  Fix the lateral flow of all flat cells to equal zero.
+
+
+if (flowunits == 0) lateral_flow = 0 
+ else lateral_flow = lateral_flow
+endif
+
+/*  Subtract the lateral flow for the given cell and add the lateral
+/*  flow amounts from all upslope cells.
+
+
+storage_amt = storage_amt - lateral_flow + (con (isnull (lateral_flow(-1, 0)), 0, lateral_flow(-1, 0)) * north + con (isnull (lateral_flow(-1, 1)), 0, lateral_flow(-1, 1)) * northeast + con (isnull (lateral_flow(0, 1)), 0, lateral_flow(0, 1)) * east + con (isnull (lateral_flow(1, 1)), 0, lateral_flow(1, 1)) * southeast + con (isnull (lateral_flow(1, 0)), 0, lateral_flow(1, 0)) * south + con (isnull (lateral_flow(1, -1)), 0, lateral_flow(1, -1)) * southwest + con (isnull (lateral_flow(0, -1)), 0, lateral_flow(0, -1)) * west + con (isnull (lateral_flow(-1, -1)), 0, lateral_flow(-1, -1)) * northwest) / 100
+
+
+/*  Determine the month of the year.
+
+
+&if %day_s% < 32 &then; 
+&setvar month_s = jan 
+&else
+&if %day_s% < 60 &then; 
+&setvar month_s = feb 
+&else 
+&if %day_s% < 91 &then; 
+&setvar month_s = mar 
+&else
+&if %day_s% < 121 &then; 
+&setvar month_s = apr
+&else
+&if %day_s% < 152 &then; 
+&setvar month_s = may
+&else
+&if %day_s% < 182 &then; 
+&setvar month_s = jun 
+&else
+&if %day_s% < 213 &then; 
+&setvar month_s = jul 
+&else
+&if %day_s% < 244 &then; 
+&setvar month_s = aug 
+&else
+&if %day_s% < 274 &then; 
+&setvar month_s = sep 
+&else
+&if %day_s% < 305 &then; 
+&setvar month_s = oct
+&else
+&if %day_s% < 335 &then; 
+&setvar month_s = nov
+&else
+&setvar month_s = dec
+
+
+/*  Using the month of the year, the landuse, and the soil moisture
+/*  content determine the amount of water lost to evapotranspiration.
+
+
+if (storage_amt_A > soil_depth_A * ETreduct_mc_A) actualet_flow = %pet% * etcoeff_%month_s% / 100; ~
+   else if (storage_amt_A / soil_depth_A > wiltpt_mc_A)
+            actualet_flow = %pet% * ((storage_amt_A / soil_depth_A - float(wiltpt_mc_A)) / (etreduct_mc_A - wiltpt_mc_A)) * etcoeff_%month_s% / 100; ~
+   else actualet_flow = 0
+endif
+
+
+/*  Determine the amount of water lost to percolation through
+/*  the restricting layer.
+
+
+perc = min(max(storage_amt - fc_amt, 0), ksubsurface)
+storage_amt = storage_amt - perc
+
+
+/*  Determine how much runoff will occur on each cell based on 
+/*  it's storage_amt.
+
+
+if (storage_amt > sat_amt) runoff_flow = storage_amt - sat_amt
+ else runoff_flow = 0
+endif
+
+
+/*  Subtract the runoff from the storage amount.
+
+storage_amt = storage_amt - runoff_flow
+
+
+/* Determine water table elevations
+
+if (storage_amt < fc_amt) piezo_E = 0
+ else if ((storage_amt - fc_amt_A - fc_amt_B) < (sat_mc_E * soil_depth_E)) piezo_E = (storage_amt - fc_amt) / (sat_mc_E - fieldcap_mc_E)
+       else piezo_E = soil_depth_E
+endif
+
+if (piezo_E < soil_depth_E) piezo_B = 0
+ else if ((storage_amt - sat_mc_E * soil_depth_E - fc_amt_A) < (sat_mc_B * soil_depth_B)) piezo_B = (storage_amt - sat_mc_E * soil_depth_E - fc_amt_B - fc_amt_A) / (sat_mc_B - fieldcap_mc_B)
+       else piezo_B = soil_depth_B
+endif
+
+if (piezo_B < soil_depth_B) piezo_A = 0
+ else if ((storage_amt - sat_mc_E * soil_depth_E - sat_mc_B * soil_depth_B) < (sat_mc_A * soil_depth_A)) piezo_A = (storage_amt - sat_mc_E * soil_depth_E - sat_mc_B * soil_depth_B - fc_amt_A) / (sat_mc_A - fieldcap_mc_A)
+       else piezo_A = soil_depth_A
+endif
+
+piezo = piezo_A + piezo_B + piezo_E
+
+
+/*  Create Output Files
+
+
+docell
+runoff += runoff_flow
+end
+&set runoff [show runoff]
+
+
+setmask p7_7
+docell
+piezo_out += piezo
+end
+&set piezo_out [show piezo_out]
+
+&listvar &file output.txt &append day_s time_s year_s runoff piezo_out
+
+&system del log
+
+
+
+
+
+
