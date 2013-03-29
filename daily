@@ -1,0 +1,122 @@
+# Soil Moisture Routing Model
+# Water Balance Program
+# Chelsea K Morris
+# last updated 28 March 2013
+
+# Distributed, physically-based model predicts soil moisture distribtuion using 
+# a simple water balance approach.
+# Input parameters include day of year, year, depth of precipitation, snowmelt,
+# potential evaporation, soils data, and elevation.
+
+setwd("~/Dropbox/Model")
+
+# Global Conditions
+
+  n <- 1000 # number of rows in gridded watershed
+	m <- 1000 # number of columns in gridded watershed
+	grid <- matrix(0,nrow=n, ncol=m)
+	weather<-read.csv("weather.csv", header=TRUE, sep=",")
+	StorageAmt <- grid  #Soil Water
+	
+	SoilDepth <- matrix(10, nrow=n, ncol=m) # depth (cm) to restrictive layer. Currently a test value is used.
+	fc <- matrix(0.4, nrow=n, ncol=m)  #field capacity as a percent of. Temporary value.
+	fcAmt <- SoilDepth*fc  #amount of water when entire cell is at field capacity (cm)
+	wp <- matrix(0.05, nrow=n, ncol=m)  #wilting point percent. Temporary value.
+	wpAmt <- SoilDepth*wp  #amount of water when entire cell is at wilting point (cm)
+	sat <- matrix(0.5, nrow=n, ncol=m) #saturation point; equal to porosity. Temporary value.
+	satAmt <- SoilDepth*sat #amount of water when entire cell is saturated (cm)
+	AWC <- satAmt-wpAmt  #available water capacity (cm)
+
+# Set daily weather conditions & step through water balance
+
+for (t in 1:length(P)){
+	date <- t
+	P<-weather$PRCP[date]  # precipitation (cm)
+	Melt<-weather$Melt[date] # snowmelt (cm) from another function. Currently set to zero.
+	PET<- weather$PET[date]  # potential evapotranspiration (cm). Currenly using monthly averages for 
+                   			 # Elmira, NY. Eventually, this parameter will be a spatially and seasonally 
+                   			 # variable coeffecient.
+	deltaP<- P-PET  # the difference between precipitation and PET (cm)
+	#To add: Call water balance function
+}
+
+# Add the daily precipitation.
+# Determine the amount of water lost to evapotranspiration with 
+# Thornthwaite-Mather equation. The acutal ET is based on soil moisture content,
+# ET coefficient, and potential ET. Taken from Jo Archibald. Slightly different
+# from Frankenberger model.
+
+#####Double-looped version
+st <- Sys.time()
+for (x in 1:nrow(grid)){
+	for (y in 1:ncol(grid)){
+		if (deltaP > 0) {
+			StorageAmt[x,y]<- StorageAmt[x,y] + deltaP + Melt
+  		} else if(deltaP <= 0){   			# Condition drying
+    			StorageAmt[x,y] <- StorageAmt[x,y]*exp(deltaP/AWC[x,y])
+		}
+	}
+}
+Sys.time()-st
+
+#####Single-looped version
+st <- Sys.time()
+for (i in 1:length(grid)){
+	if (deltaP > 0) {
+			StorageAmt[i]<- StorageAmt[i] + deltaP + Melt
+  		} else if(deltaP <= 0){   			# Condition drying
+    			StorageAmt[i] <- StorageAmt[i]*exp(deltaP/AWC[i])
+		}
+}
+Sys.time()-st
+
+
+# Distribute precipitation input among soil layers.
+
+      ###To be determined.
+
+# Calculate portion of the soil column that is saturated, at field capacity,
+# or below field capacity and assign an effective hydraulic conductivity that
+# will determine lateral flow.
+
+
+Excess <- grid  #Amount of water available to flow out of the cell (cm).
+Runoff <- grid	# Runoff (cm)
+
+#####Double-looped version
+st <- Sys.time()
+for (x in 1:nrow(grid)){
+	for (y in 1:ncol(grid)){
+  		if (StorageAmt[x,y] <= fcAmt[x,y]) {
+    		Excess[x,y] <- 0   #Cell has uniform moisture gradient, no saturated portion
+  		} 
+  		else if (StorageAmt[x,y] > satAmt[x,y]){
+    		Runoff[x,y] <- (StorageAmt[x,y]-satAmt[x,y]) #Cell has some portion in above saturation 
+            				                             # that will become runoff.
+   
+    		Excess[x,y] <- (satAmt[x,y]-fcAmt[x,y])      #The rest above field capacity will move laterally 
+  		}                                			     # and/or to GW storage.
+  		else if (StorageAmt[x,y] > fcAmt[x,y])  {
+    		Excess[x,y] <- (StorageAmt[x,y]-fcAmt[x,y])  #Cell has some sat. portion that move laterally 
+ 		 }                                   		     # and/or enter the GW storage.
+	}
+}
+Sys.time()-st
+
+#####Single-looped version
+st <- Sys.time()
+for (i in 1:length(grid)){
+  if (StorageAmt[i] <= fcAmt[i]) {
+   	Excess[i] <- 0   #Cell has uniform moisture gradient, no saturated portion
+  } 
+  else if (StorageAmt[i] > satAmt[i]){
+    Runoff[i] <- (StorageAmt[i]-satAmt[i]) #Cell has some portion in above saturation 
+                                        # that will become runoff.
+   
+    Excess[i] <- (satAmt[i]-fcAmt[i])         #The rest above field capacity will move laterally 
+  }                                     # and/or to GW storage.
+  else if (StorageAmt[i] > fcAmt[i])  {
+    Excess[i] <- (StorageAmt[i]-fcAmt[i])  #Cell has some sat. portion that move laterally 
+  }                                     # and/or enter the GW storage.
+}
+Sys.time()-st
